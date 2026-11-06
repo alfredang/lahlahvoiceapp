@@ -1,0 +1,144 @@
+name: NovaVoice
+options:
+  bundleIdPrefix: com.tertiaryinfotech
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"
+    macOS: "26.0"
+settings:
+  base:
+    DEVELOPMENT_TEAM: GU9WTSTX9M
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "4"
+    SWIFT_VERSION: "5.10"
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+packages:
+  NovaVoiceCore:
+    path: Packages/NovaVoiceCore
+targets:
+  NovaVoiceMac:
+    type: application
+    platform: macOS
+    sources:
+      - Apps/macOS
+      - Apps/Shared
+      - path: Assets/Mac.xcassets
+    dependencies:
+      - package: NovaVoiceCore
+    settings:
+      base:
+        PRODUCT_NAME: "LahLah Voice"
+        PRODUCT_BUNDLE_IDENTIFIER: com.tertiaryinfotech.novavoice.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_HARDENED_RUNTIME: YES
+        CODE_SIGN_ENTITLEMENTS: Apps/macOS/NovaVoice.entitlements
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGN_IDENTITY: "Developer ID Application"
+        PROVISIONING_PROFILE_SPECIFIER: ""
+        GENERATE_INFOPLIST_FILE: NO
+        INFOPLIST_FILE: Apps/macOS/Info.plist
+
+  NovaVoice:
+    type: application
+    platform: iOS
+    sources:
+      - Apps/iOS
+      - Apps/Shared
+      - Apps/SharedSession
+      - Apps/SharedKeyboard
+      - path: Assets/iOS.xcassets
+    dependencies:
+      - package: NovaVoiceCore
+      - target: NovaVoiceKeyboard
+      - target: NovaVoiceWidgets
+    info:
+      path: Apps/iOS/Info.plist
+      properties:
+        CFBundleDisplayName: LahLah Voice
+        CFBundleIconName: AppIcon
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        LSApplicationCategoryType: public.app-category.productivity
+        NSMicrophoneUsageDescription: LahLah Voice listens while you dictate and turns your speech into text on this iPhone.
+        NSSpeechRecognitionUsageDescription: LahLah Voice recognises your speech on this iPhone to write your text.
+        NSSupportsLiveActivities: true
+        UIBackgroundModes: [audio]
+        UILaunchScreen: {}
+        UIRequiredDeviceCapabilities: [arm64]
+        UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait]
+    settings:
+      base:
+        PRODUCT_NAME: NovaVoice
+        PRODUCT_BUNDLE_IDENTIFIER: com.tertiaryinfotech.novavoice
+        TARGETED_DEVICE_FAMILY: "1"
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        CODE_SIGN_ENTITLEMENTS: Apps/iOS/NovaVoice.entitlements
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) NOVA_APP"
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "NovaVoice AppStore"
+
+  NovaVoiceKeyboard:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/Keyboard
+      - Apps/SharedKeyboard
+    dependencies:
+      - package: NovaVoiceCore
+        product: NovaVoiceBridge
+    info:
+      path: Extensions/Keyboard/Info.plist
+      properties:
+        CFBundleDisplayName: LahLah Voice
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        NSExtension:
+          NSExtensionAttributes:
+            IsASCIICapable: false
+            PrefersRightToLeft: false
+            PrimaryLanguage: en-US
+            RequestsOpenAccess: true
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+    settings:
+      base:
+        PRODUCT_NAME: NovaVoiceKeyboard
+        PRODUCT_BUNDLE_IDENTIFIER: com.tertiaryinfotech.novavoice.keyboard
+        TARGETED_DEVICE_FAMILY: "1"
+        CODE_SIGN_ENTITLEMENTS: Extensions/Keyboard/Keyboard.entitlements
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "NovaVoice Keyboard AppStore"
+
+  NovaVoiceWidgets:
+    type: app-extension
+    platform: iOS
+    sources:
+      - Extensions/Widgets
+      - Apps/SharedSession
+    info:
+      path: Extensions/Widgets/Info.plist
+      properties:
+        CFBundleDisplayName: LahLah Voice
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        ITSAppUsesNonExemptEncryption: false
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.widgetkit-extension
+    settings:
+      base:
+        PRODUCT_NAME: NovaVoiceWidgets
+        PRODUCT_BUNDLE_IDENTIFIER: com.tertiaryinfotech.novavoice.widgets
+        TARGETED_DEVICE_FAMILY: "1"
+      configs:
+        Release:
+          CODE_SIGN_STYLE: Manual
+          CODE_SIGN_IDENTITY: "Apple Distribution"
+          PROVISIONING_PROFILE_SPECIFIER: "NovaVoice Widgets AppStore"

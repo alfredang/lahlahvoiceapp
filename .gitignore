@@ -1,0 +1,32 @@
+.env
+.env.*
+!.env.example
+*.p8
+*.pem
+*.key
+*.p12
+*.mobileprovision
+build/
+dist/
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
+.DS_Store
+.playwright-mcp/
+docs/research/
+# Generated from project.yml by XcodeGen.
+NovaVoice.xcodeproj/
+.claude/settings.local.json
+# Distribution archives (rebuildable, never pushed to GitHub)
+*.zip
+# Source material the project was derived from, not ours to republish.
+**/reference/
+!.claude/skills/**/reference/
+!.claude/skills/**/reference/**
+# iOS skills: imported for local use. They hold account details and sign-in steps, and this repo is public.
+.claude/skills/app-store-submission/
+.claude/skills/asc-api-submit/
+.claude/skills/ios-auto-release/
+.claude/skills/mobile-ios-design/
