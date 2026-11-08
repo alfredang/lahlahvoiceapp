@@ -55,6 +55,10 @@ final class DictationController {
     private var sendWhenDone = false
     /// Looks for the user's corrections to the last paste, to learn those words.
     private var correctionCheck: Task<Void, Never>?
+    /// Normal dictation, or every utterance goes to LahLah Video as a command (set through the API).
+    var mode: VoiceMode = .normal
+    /// The local control API (Settings › API).
+    let control = ControlServer()
 
     init(store: NovaStore) {
         self.store = store
@@ -146,6 +150,9 @@ final class DictationController {
 
         startHotkeys()
         listenForRemoteToggle()
+        control.handler = self
+        control.isEnabled = { [weak self] in self?.store.settings.apiEnabled ?? false }
+        control.start()
         AppleIntelligenceEditor.prewarm()
 
         Task {
@@ -375,6 +382,11 @@ final class DictationController {
         guard !raw.isEmpty else { return showMessage("Didn't catch that") }
 
         let settings = store.settings
+        if mode == .lahlahVideoCommand {
+            forwardToLahLahVideo(raw)
+            return
+        }
+        if settings.lahlahVideoCommands, sendToLahLahVideo(raw) { return }
         let command = settings.pressEnterCommand ? VoiceCommands.splitPressEnter(raw) : (raw, false)
         let bundleID = targetApp?.bundleIdentifier
         let style = AppCatalog.style(forBundleID: bundleID, host: targetHost, settings: settings)
@@ -511,6 +523,32 @@ final class DictationController {
         return usesFn && FnKeySetting.current != .doNothing
     }
 
+    /// LahLah Video commands: runs the words as an editing command instead of typing them.
+    /// Returns false when the words are not meant for LahLah Video.
+    private func sendToLahLahVideo(_ raw: String) -> Bool {
+        guard let command = LahLahVideoCommands.command(from: raw, frontmostBundleID: targetApp?.bundleIdentifier)
+        else { return false }
+        forwardToLahLahVideo(command)
+        return true
+    }
+
+    private func forwardToLahLahVideo(_ text: String) {
+        Task {
+            let delivery = await deliverToLahLahVideo(text)
+            showMessage(delivery.ok ? "LahLah Video: \(delivery.message)" : delivery.message)
+        }
+    }
+
+    /// LahLah Video's API first (it answers with what it did), the lahlahvideo:// link as the fallback.
+    func deliverToLahLahVideo(_ text: String) async -> LahLahVideoDelivery {
+        let command = text.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters))
+        if let viaAPI = await LahLahVideoLink.sendViaAPI(command) { return viaAPI }
+        guard let url = LahLahVideoCommands.url(for: command), NSWorkspace.shared.open(url) else {
+            return LahLahVideoDelivery(ok: false, via: "deep-link", message: "Install LahLah Video to use video commands")
+        }
+        return LahLahVideoDelivery(ok: true, via: "deep-link", message: command)
+    }
+
     private func showMessage(_ message: String) {
         lastMessage = message
         hud.flash(message)
@@ -521,4 +559,44 @@ struct DictationFailure: LocalizedError {
     let message: String
     init(_ message: String) { self.message = message }
     var errorDescription: String? { message }
+}
+
+// MARK: - Local API (Settings › API)
+
+extension DictationController: VoiceAPIHandler {
+    private var phaseName: String {
+        switch phase {
+        case .idle: "idle"
+        case .listening: "listening"
+        case .working: "working"
+        }
+    }
+
+    func apiStatus() -> VoiceAPIStatus {
+        VoiceAPIStatus(
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "",
+            phase: phaseName, mode: mode, lastTranscript: store.history.first?.final,
+            lahlahVideoAvailable: LahLahVideoLink.readControl() != nil)
+    }
+
+    func apiStartDictation() -> String {
+        if phase == .idle { beginDictation(handsFree: true) }
+        return phaseName
+    }
+
+    func apiStopDictation() -> String {
+        if case .listening = phase { endDictation() }
+        return phaseName
+    }
+
+    func apiLastTranscript() -> DictationRecord? { store.history.first }
+
+    func apiSetMode(_ mode: VoiceMode) {
+        self.mode = mode
+        showMessage(mode == .lahlahVideoCommand ? "Voice now edits in LahLah Video" : "Back to normal dictation")
+    }
+
+    func apiSendToLahLahVideo(_ text: String) async -> LahLahVideoDelivery {
+        await deliverToLahLahVideo(text)
+    }
 }
