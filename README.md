@@ -18,6 +18,9 @@ with an optional open model (Qwen3.5 through MLX) as the primary model or the fa
 
 Website: <https://alfredang.github.io/lahlahvoiceapp/>
 
+The Android app (voice keyboard, Gemini Nano) lives in its own repo:
+[lahlahvoiceapp_android](https://github.com/alfredang/lahlahvoiceapp_android).
+
 ## Mac features
 
 - **Hotkeys you choose:** hold to talk, hands-free, edit selection, paste last dictation, open
