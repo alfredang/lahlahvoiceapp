@@ -20,12 +20,21 @@ Website: <https://alfredang.github.io/lahlahvoice/>
 
 ## Mac features
 
-- **Hotkeys you choose:** hold to talk, hands-free, edit selection, paste last dictation and open
-  scratchpad. Combinations can use up to 3 keys or a mouse button. The defaults are below.
+- **Hotkeys you choose:** hold to talk, hands-free, edit selection, paste last dictation, open
+  scratchpad and open LahLah Voice. Combinations can use up to 3 keys or a mouse button. The defaults are below.
 - **Transforms:** saved instructions that rewrite selected text with one key press. A hotkey you
   press while setting one is kept even if you leave the page.
 - **Scratchpad:** a floating window for rough notes.
-- **Personalize:** dictionary, snippets, and a writing style for each type of app.
+- **Personalize:** dictionary, snippets, and a writing style for each type of app. AI assistants
+  default to **Clear and concise**, which turns thinking aloud into clear sentences without losing a
+  point or question, and fixes words the recogniser clearly misheard.
+- **About You:** notes the model should know (your work, topics, spelling preferences), each for
+  every app or one kind of app, plus a sample of your writing to match. They help it hear the right
+  word and are never added to your text.
+- **Learn words I correct** (off by default): if you fix a misheard word after a paste, that word is
+  added to your dictionary.
+- **Sending like a voice message:** while listening hands-free, Space or the Send button on the pill
+  finishes, pastes and presses Return.
 - **Notes and insights:** voice notes with Apple Intelligence summaries, and usage by app.
 - **Wiki LLM and Planner:** their agent panels have a mic button that starts and stops hands-free
   dictation into the agent's terminal. It works over a local notification (`RemoteControl`) that's
@@ -40,6 +49,7 @@ Website: <https://alfredang.github.io/lahlahvoice/>
 | Option+2 | Speak an edit to the selected text |
 | Option+3 | Paste your last dictation |
 | Option+4 | Open the scratchpad |
+| Option+L | Open the LahLah Voice window |
 | Esc | Cancel |
 
 While Fn is a LahLah hotkey, its 🌐 press is kept from the app in front, so it never opens Emoji &
@@ -80,6 +90,7 @@ Microphone → SpeechAnalyzer (on-device) → rule-based cleanup → Foundation 
 |---|---|
 | `Packages/NovaVoiceCore` | Pipeline, hotkey rules, speech engine, audio capture, storage, tests |
 | `Packages/NovaVoiceCore/Sources/NovaVoiceBridge` | Keyboard-to-app link, kept small for the keyboard's memory limit |
+| `Packages/NovaVoiceCore/Sources/NovaVoiceLocalModel` | Open Qwen3.5 models through MLX, linked by the apps only |
 | `Apps/macOS` | Main window, global hotkeys, overlay pill, pasting |
 | `Apps/iOS` | iPhone app and voice session |
 | `Apps/Shared` | Brand styling and screens used by both apps |
@@ -109,7 +120,21 @@ cd Packages/NovaVoiceCore
 swift run novavoice-eval                       # Intent test cases
 say -o /tmp/a.aiff "Um, the meeting is Tuesday, no wait, Wednesday."
 swift run novavoice-eval --file /tmp/a.aiff    # Real speech recognition, then the pipeline
+swift run novavoice-eval --text "…" --style clear --note "I teach group theory"
 ```
+
+To measure an open model, add `--model mlx-community/Qwen3.5-4B-MLX-4bit`. MLX needs its Metal
+shaders, which `swift run` doesn't build, so build with Xcode instead (once:
+`xcodebuild -downloadComponent MetalToolchain`):
+
+```bash
+xcodebuild -scheme novavoice-eval -destination 'platform=macOS' -configuration Release \
+  -derivedDataPath /tmp/dd-eval -skipMacroValidation build
+/tmp/dd-eval/Build/Products/Release/novavoice-eval --model mlx-community/Qwen3.5-4B-MLX-4bit
+```
+
+On the 13 intent cases, Apple Intelligence, Qwen3.5 2B and Qwen3.5 4B all pass. Ministral 3 3B
+failed three, so it isn't offered.
 
 The iOS Simulator can't run speech recognition, and it can't run the Apple Intelligence model while
 the Mac's Apple Intelligence setting is off. Test the full keyboard flow on a real iPhone.
@@ -126,7 +151,8 @@ the Mac's Apple Intelligence setting is off. Test the full keyboard flow on a re
 
 ## Privacy and terms
 
-No account, no server, no analytics. See the
+No account, no server, no analytics. Choosing an open model downloads it once from Hugging Face;
+nothing you say is sent. See the
 [privacy policy](https://www.tertiaryinfotech.com/privacy) and
 [terms of service](https://www.tertiaryinfotech.com/terms).
 

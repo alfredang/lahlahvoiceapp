@@ -30,3 +30,6 @@ NovaVoice.xcodeproj/
 .claude/skills/asc-api-submit/
 .claude/skills/ios-auto-release/
 .claude/skills/mobile-ios-design/
+
+# Code coverage output from swift test
+*.profraw
