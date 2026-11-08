@@ -8,10 +8,11 @@ import NovaVoiceCore
 /// Hold to talk also has two gestures built in:
 ///   Double-tap   keep listening hands-free until the next press
 ///   Esc          cancel while listening
+///   Space        finish and send, while listening hands-free (when that setting is on)
 @MainActor
 final class HotkeyMonitor {
     enum Trigger: Hashable {
-        case handsFree, editSelection, pasteLast, scratchpad
+        case handsFree, editSelection, pasteLast, scratchpad, openApp
         case transform(UUID)
     }
 
@@ -28,6 +29,9 @@ final class HotkeyMonitor {
     var onTrigger: ((Trigger) -> Void)?
     var onCancel: (() -> Void)?
     var isDictationActive: (() -> Bool)?
+    /// True while listening hands-free with "Space finishes and sends" on.
+    var spaceSends: (() -> Bool)?
+    var onSend: (() -> Void)?
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
@@ -90,10 +94,18 @@ final class HotkeyMonitor {
         }
         guard !isPaused else { return false }
 
+        // The 🌐 key can also send a key press of its own (code 179), which is what opens Emoji &
+        // Symbols. It is the same key as Fn, so it belongs to an Fn hotkey and stays out of the app.
+        if type == .keyDown || type == .keyUp,
+            event.getIntegerValueField(.keyboardEventKeycode) == Self.globeKeyCode
+        {
+            return usesFn
+        }
+
         switch type {
         case .flagsChanged:
             handleFlags(event)
-            return false
+            return isOwnFnKey(event)
         case .keyDown:
             let token = HotkeyToken.key(Int(event.getIntegerValueField(.keyboardEventKeycode)))
             if event.getIntegerValueField(.keyboardEventAutorepeat) != 0 {
@@ -109,6 +121,23 @@ final class HotkeyMonitor {
         default:
             return false
         }
+    }
+
+    /// The Fn / 🌐 key's own press and release, when one of our combinations uses Fn. They must not
+    /// reach the app in front: macOS acts on them there (Emoji & Symbols, input source, Apple
+    /// dictation), even with "Press 🌐 key to" set to Do Nothing on some versions, and the emoji
+    /// picker then takes the place of the listening pill.
+    private func isOwnFnKey(_ event: CGEvent) -> Bool {
+        let code = Int(event.getIntegerValueField(.keyboardEventKeycode))
+        guard code == kVK_Function || code == Self.globeKeyCode else { return false }
+        return usesFn
+    }
+
+    /// The 🌐 (Globe) key's own key code. On Macs with a 🌐 key it is the Fn key.
+    static let globeKeyCode: Int64 = 179
+
+    private var usesFn: Bool {
+        pushToTalk.contains { $0.tokens.contains(.fn) } || triggers.contains { $0.hotkey.tokens.contains(.fn) }
     }
 
     private func resetPressed() {
@@ -147,6 +176,17 @@ final class HotkeyMonitor {
             lastTapUp = nil
             swallowed.insert(token)
             onCancel?()
+            return true
+        }
+
+        // Space on its own, like tapping send on a chat app's voice message.
+        if token == .key(kVK_Space), HotkeyToken.modifiers(rawFlags: event.flags.rawValue).isEmpty,
+            spaceSends?() == true
+        {
+            lockedHandsFree = false
+            lastTapUp = nil
+            swallowed.insert(token)
+            onSend?()
             return true
         }
 

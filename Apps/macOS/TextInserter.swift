@@ -195,6 +195,21 @@ enum FocusContext {
         return String(text.suffix(2000))
     }
 
+    /// The focused text box, so it can be read again later. Never a password field.
+    static var focusedTextElement: AXUIElement? {
+        guard let element = focusedElement,
+            attribute(element, kAXSubroleAttribute) as? String != kAXSecureTextFieldSubrole,
+            attribute(element, kAXValueAttribute) is String
+        else { return nil }
+        return element
+    }
+
+    /// What a text box holds now. Nil once it's gone or isn't readable.
+    static func text(of element: AXUIElement) -> String? {
+        guard let text = attribute(element, kAXValueAttribute) as? String else { return nil }
+        return String(text.suffix(4000))
+    }
+
     /// The address of the page in front, if that app is a browser. Only the host name is kept.
     static func webHost(for app: NSRunningApplication?) -> String? {
         guard let app, let bundleID = app.bundleIdentifier else { return nil }

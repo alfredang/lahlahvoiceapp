@@ -37,7 +37,7 @@ struct NovaVoiceMacApp: App {
                 .environment(store)
                 .environment(controller)
         } label: {
-            Image(systemName: controller.menuBarSymbol)
+            MenuBarLabel(controller: controller)
         }
     }
 }
@@ -50,6 +50,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Don't leave the speakers muted if the app quits in the middle of a dictation.
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated { SystemAudio.restoreOutput() }
+    }
+}
+
+/// The menu bar icon. It's always on screen, so it hands the controller a way to open the
+/// main window, which the "Open LahLah Voice" hotkey uses.
+struct MenuBarLabel: View {
+    let controller: DictationController
+    @Environment(\.openWindow) private var openWindow
+
+    var body: some View {
+        Image(systemName: controller.menuBarSymbol)
+            .onAppear {
+                controller.openMainWindow = {
+                    NSApp.activate()
+                    openWindow(id: "main")
+                }
+            }
     }
 }
 

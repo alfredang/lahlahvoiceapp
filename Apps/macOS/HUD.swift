@@ -41,7 +41,13 @@ final class HUDController {
         guard let controller else { return }
         let panel = self.panel ?? makePanel()
         self.panel = panel
-        panel.contentView = NSHostingView(rootView: HUDView(message: message).environment(controller))
+        panel.contentView = ClickThroughHostingView(rootView: HUDView(message: message).environment(controller))
+        // Only clickable while listening, for the Send button. Otherwise clicks pass through.
+        if case .listening(_, false) = controller.phase, message == nil {
+            panel.ignoresMouseEvents = false
+        } else {
+            panel.ignoresMouseEvents = true
+        }
         position(panel)
         panel.orderFrontRegardless()
     }
@@ -69,6 +75,12 @@ final class HUDController {
         panel.setFrameOrigin(
             NSPoint(x: frame.midX - panel.frame.width / 2, y: frame.minY + 4))
     }
+}
+
+/// Takes the first click, so Send works without first activating LahLah Voice. The panel is
+/// non-activating, so the app being written in keeps focus and receives the text.
+private final class ClickThroughHostingView<Content: View>: NSHostingView<Content> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 }
 
 struct HUDView: View {
@@ -100,14 +112,17 @@ struct HUDView: View {
                 if command {
                     VoiceWave(level: controller.level, barCount: 13)
                     Text("Say your edit").font(.callout.weight(.medium))
-                } else if controller.partial.isEmpty {
-                    VoiceWave(level: controller.level)
                 } else {
-                    VoiceWave(level: controller.level, barCount: 13)
-                    Text(String(controller.partial.suffix(38)))
-                        .font(.callout)
-                        .foregroundStyle(Brand.muted)
-                        .lineLimit(1)
+                    if controller.partial.isEmpty {
+                        VoiceWave(level: controller.level)
+                    } else {
+                        VoiceWave(level: controller.level, barCount: 13)
+                        Text(String(controller.partial.suffix(30)))
+                            .font(.callout)
+                            .foregroundStyle(Brand.muted)
+                            .lineLimit(1)
+                    }
+                    sendButton
                 }
             case .working:
                 Image(systemName: "ellipsis").symbolEffect(.pulse)
@@ -116,5 +131,22 @@ struct HUDView: View {
                 EmptyView()
             }
         }
+    }
+
+    /// Finishes, pastes and presses Return, like sending a voice message.
+    private var sendButton: some View {
+        Button {
+            controller.finishAndSend()
+        } label: {
+            Label("Send", systemImage: "arrow.up")
+                .font(.callout.weight(.semibold))
+                .labelStyle(.titleAndIcon)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .foregroundStyle(.white)
+                .background(Brand.ember, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Send (Space while hands-free)")
     }
 }

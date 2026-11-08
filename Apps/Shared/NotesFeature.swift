@@ -61,8 +61,17 @@ final class NoteRecorder {
         }
         let locale = await chosenLocale(store)
         var note = VoiceNote(title: "Voice note", transcript: text, durationSeconds: duration)
+        // Tidy the rambling first, like dictation, then summarise the tidy version.
+        let cleaned = await DictationPipeline().process(
+            raw: text, style: .clear, category: .documents, locale: locale,
+            dictionary: store.dictionary, snippets: [],
+            useAppleIntelligence: store.settings.useAppleIntelligence,
+            personalContext: PersonalContext.instructions(
+                notes: store.settings.personalNotes, writingSample: store.settings.writingSample,
+                category: .documents, style: .clear))
+        if cleaned.usedAppleIntelligence { note.cleaned = cleaned.text }
         if store.settings.useAppleIntelligence,
-            let summary = await AppleIntelligenceEditor().summarise(text, locale: locale)
+            let summary = await AppleIntelligenceEditor().summarise(cleaned.text, locale: locale)
         {
             note.title = summary.title
             var body = summary.summary
@@ -168,15 +177,24 @@ struct NoteDetailView: View {
                     Text("Summary").font(.headline)
                     Text(summary).textSelection(.enabled)
                 }
-                Text("Transcript").font(.headline)
-                Text(note.transcript).textSelection(.enabled)
+                if let cleaned = note.cleaned {
+                    Text("Note").font(.headline)
+                    Text(cleaned).textSelection(.enabled)
+                    DisclosureGroup("What you said") {
+                        Text(note.transcript).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                } else {
+                    Text("Transcript").font(.headline)
+                    Text(note.transcript).textSelection(.enabled)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding()
         }
         .navigationTitle(note.title)
         .toolbar {
-            ShareLink(item: (note.summary.map { $0 + "\n\n" } ?? "") + note.transcript)
+            ShareLink(item: (note.summary.map { $0 + "\n\n" } ?? "") + (note.cleaned ?? note.transcript))
         }
     }
 }

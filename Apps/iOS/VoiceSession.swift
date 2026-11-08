@@ -25,7 +25,6 @@ final class VoiceSession {
 
     private let capture = AudioCapture()
     private let speech = SpeechEngine()
-    private let pipeline = DictationPipeline()
     private let bridge = SessionBridge.shared
     private let cleaner = TranscriptCleaner()
 
@@ -210,6 +209,13 @@ final class VoiceSession {
         if !raw.isEmpty {
             // The keyboard's chosen style applies to its dictation, and the default applies in the app.
             let style = isLocal ? store.settings.defaultStyle : bridge.style
+            // The primary model, then the fallback. Until Qwen is downloaded, Apple Intelligence
+            // stands in for it.
+            let settings = store.settings
+            let localModel = LocalModelManager.shared.active(for: settings)
+            var order = settings.engineOrder
+            if localModel == nil, !order.contains(.appleIntelligence) { order.append(.appleIntelligence) }
+            let pipeline = DictationPipeline(localModel: localModel, order: order)
             let result = await pipeline.process(
                 raw: raw, style: style, locale: chosen, dictionary: store.dictionary,
                 snippets: store.snippets, useAppleIntelligence: store.settings.useAppleIntelligence)

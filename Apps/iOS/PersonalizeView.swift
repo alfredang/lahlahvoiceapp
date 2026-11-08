@@ -32,7 +32,11 @@ struct PersonalizeView: View {
             } header: {
                 Text("Dictation")
             } footer: {
-                Text("Uses Apple Intelligence on this iPhone to apply corrections and tidy your wording. Choose a keyboard style from the keyboard itself.")
+                Text("Applies your corrections and tidies your wording on this iPhone. Choose a keyboard style from the keyboard itself.")
+            }
+
+            if store.settings.useAppleIntelligence {
+                ModelSection()
             }
 
             Section {
@@ -70,6 +74,102 @@ struct PersonalizeView: View {
                 let best = await SpeechEngine.bestLocale(for: saved)
             {
                 store.settings.localeIdentifier = best.identifier
+            }
+        }
+    }
+}
+
+/// Primary model and fallback: Apple Intelligence and Qwen, both on this iPhone.
+private struct ModelSection: View {
+    @Environment(NovaStore.self) private var store
+    private var models: LocalModelManager { .shared }
+
+    private enum Choice: Hashable { case none, apple, qwen }
+
+    var body: some View {
+        Section {
+            Picker("Primary model", selection: primary) {
+                Text(CleanupEngine.appleIntelligence.title).tag(Choice.apple)
+                Text(qwenTitle).tag(Choice.qwen)
+            }
+            Picker("Fallback model", selection: fallback) {
+                Text("None").tag(Choice.none)
+                if store.settings.cleanupEngine == .localModel {
+                    Text(CleanupEngine.appleIntelligence.title).tag(Choice.apple)
+                } else {
+                    Text(qwenTitle).tag(Choice.qwen)
+                }
+            }
+            if store.settings.usesLocalModel { status }
+        } header: {
+            Text("Model")
+        } footer: {
+            Text("The fallback is used when the primary model is unavailable, declines or changes your meaning. Both run on this iPhone, and nothing you say is sent anywhere.")
+        }
+        .onAppear { models.refresh(for: store.settings) }
+    }
+
+    private var qwenTitle: String {
+        guard let option = LocalModelManager.options.first else { return "Qwen" }
+        return "\(option.name) · \(option.size)"
+    }
+
+    @ViewBuilder private var status: some View {
+        switch models.state {
+        case .notDownloaded:
+            Button("Download \(qwenTitle)") { models.download(store.settings.localModelID) }
+        case .downloading(let fraction):
+            VStack(alignment: .leading, spacing: 6) {
+                ProgressView(value: fraction)
+                Text("Downloading once from Hugging Face. Keep LahLah Voice open; Apple Intelligence is used until it's ready.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        case .ready:
+            Label("Ready on this iPhone", systemImage: "checkmark.circle.fill").foregroundStyle(.green)
+        case .failed(let message):
+            VStack(alignment: .leading, spacing: 6) {
+                Label("Couldn't download: \(message)", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(.orange)
+                Button("Try again") { models.download(store.settings.localModelID) }
+            }
+        }
+    }
+
+    /// Picking Qwen points the setting at the iPhone's model and offers the download.
+    private func useQwen() {
+        store.settings.localModelID = LocalModelManager.defaultID
+        models.refresh(for: store.settings)
+    }
+
+    private var primary: Binding<Choice> {
+        Binding {
+            store.settings.cleanupEngine == .localModel ? .qwen : .apple
+        } set: { choice in
+            if choice == .qwen {
+                store.settings.cleanupEngine = .localModel
+                if store.settings.fallbackEngine == .localModel { store.settings.fallbackEngine = .appleIntelligence }
+                useQwen()
+            } else {
+                store.settings.cleanupEngine = .appleIntelligence
+                if store.settings.fallbackEngine == .appleIntelligence { store.settings.fallbackEngine = nil }
+            }
+        }
+    }
+
+    private var fallback: Binding<Choice> {
+        Binding {
+            switch store.settings.fallbackEngine {
+            case .none: .none
+            case .appleIntelligence: .apple
+            case .localModel: .qwen
+            }
+        } set: { choice in
+            switch choice {
+            case .none: store.settings.fallbackEngine = nil
+            case .apple: store.settings.fallbackEngine = .appleIntelligence
+            case .qwen:
+                store.settings.fallbackEngine = .localModel
+                useQwen()
             }
         }
     }

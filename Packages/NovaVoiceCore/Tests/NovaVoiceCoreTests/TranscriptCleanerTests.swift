@@ -102,9 +102,18 @@ import Testing
         ("com.tdesktop.Telegram", AppCategory.messaging),
         ("com.openai.codex", AppCategory.ai),
         ("com.anthropic.claudefordesktop", AppCategory.ai),
+        ("com.tertiaryinfotech.markdownapp", AppCategory.ai),
+        ("com.tertiaryinfotech.plannerapp", AppCategory.ai),
     ])
     func recognisesDesktopApps(bundleID: String, category: AppCategory) {
         #expect(AppCatalog.category(forBundleID: bundleID) == category)
+    }
+
+    @Test func onlyOurAgentAppsCanStartDictation() {
+        #expect(RemoteControl.isAllowed("com.tertiaryinfotech.markdownapp"))
+        #expect(RemoteControl.isAllowed("com.tertiaryinfotech.plannerapp"))
+        #expect(!RemoteControl.isAllowed("com.apple.Terminal"))
+        #expect(!RemoteControl.isAllowed(nil))
     }
 
     @Test func webAppsMatchTheirDesktopCategory() {

@@ -6,7 +6,7 @@ import SwiftUI
 struct MainWindow: View {
     enum Section: String, CaseIterable, Identifiable {
         case dictation = "Dictation", notes = "Notes", dictionary = "Dictionary", snippets = "Snippets"
-        case styles = "Styles", transforms = "Transforms", insights = "Insights"
+        case styles = "Styles", aboutYou = "About You", transforms = "Transforms", insights = "Insights"
         case hotkeys = "Hotkeys", settings = "Settings"
 
         var id: String { rawValue }
@@ -18,6 +18,7 @@ struct MainWindow: View {
             case .dictionary: "character.book.closed"
             case .snippets: "text.bubble"
             case .styles: "textformat"
+            case .aboutYou: "person.text.rectangle"
             case .transforms: "wand.and.stars"
             case .insights: "chart.bar"
             case .hotkeys: "command"
@@ -32,6 +33,7 @@ struct MainWindow: View {
             case .dictionary: "Names and terms you want spelled your way."
             case .snippets: "Say a short cue and get the full text."
             case .styles: "Your tone follows the app you're writing in."
+            case .aboutYou: "Tell LahLah Voice about you, so it understands and writes like you."
             case .transforms: "Rewrite selected text with one key press, using Apple Intelligence."
             case .insights: "How much you've dictated and where."
             case .hotkeys: "Choose the keys and mouse buttons that control LahLah Voice."
@@ -67,7 +69,7 @@ struct MainWindow: View {
             .padding(.horizontal, 10)
             .padding(.bottom, 18)
 
-            ForEach([Section.dictation, .notes, .dictionary, .snippets, .styles, .transforms, .insights]) {
+            ForEach([Section.dictation, .notes, .dictionary, .snippets, .styles, .aboutYou, .transforms, .insights]) {
                 item($0)
             }
             Spacer()
@@ -119,6 +121,7 @@ struct MainWindow: View {
                     case .dictionary: DictionaryView().padding(.horizontal, 20)
                     case .snippets: SnippetsView().padding(.horizontal, 20)
                     case .styles: StylesView().padding(.horizontal, 20)
+                    case .aboutYou: AboutYouView().padding(.horizontal, 20)
                     case .transforms: TransformsPage().padding(.horizontal, 36)
                     case .insights: InsightsView().padding(.horizontal, 36)
                     case .hotkeys: HotkeysPage().padding(.horizontal, 36)
@@ -438,11 +441,12 @@ struct SetupChecklist: View {
     @State private var micGranted = MicrophoneAccess.isGranted
     @State private var axGranted = TextInserter.isTrusted
     @State private var intelligence = AppleIntelligenceEditor.status
+    @State private var fnConflict = false
     private let timer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
 
     var body: some View {
         Group {
-            if !micGranted || !axGranted || intelligence != .available {
+            if !micGranted || !axGranted || intelligence != .available || fnConflict {
                 VStack(alignment: .leading, spacing: 12) {
                     Text("Finish setting up").font(.headline)
                     if !micGranted {
@@ -467,6 +471,11 @@ struct SetupChecklist: View {
                                 TextInserter.openAccessibilitySettings()
                             })
                     }
+                    if fnConflict {
+                        step(
+                            "Fn key", "Pressing 🌐 also opens “\(FnKeySetting.current.title)”, which takes your text. In Keyboard settings, set “Press 🌐 key to” to Do Nothing.",
+                            action: "Open Settings", run: FnKeySetting.openKeyboardSettings)
+                    }
                     if intelligence != .available {
                         step(
                             intelligence.title, intelligence.detail, action: "Open Settings",
@@ -485,6 +494,7 @@ struct SetupChecklist: View {
         .onReceive(timer) { _ in
             micGranted = MicrophoneAccess.isGranted
             intelligence = AppleIntelligenceEditor.status
+            fnConflict = controller.fnKeyHasSystemAction
             let granted = TextInserter.isTrusted
             if granted, !axGranted { controller.startHotkeys() }
             axGranted = granted
@@ -565,7 +575,10 @@ struct SettingsView: View {
                         Text(SpeechEngine.displayName(for: locale)).tag(locale.identifier)
                     }
                 }
-                Toggle("Use Apple Intelligence to understand what you meant", isOn: $store.settings.useAppleIntelligence)
+                Toggle("Understand what I meant, not just what I said", isOn: $store.settings.useAppleIntelligence)
+                if store.settings.useAppleIntelligence {
+                    ModelChoice()
+                }
                 Toggle("Play a sound when dictation starts and stops", isOn: $store.settings.playSounds)
                 Toggle("Mute speakers while dictating", isOn: $store.settings.muteWhileDictating)
                 Toggle(isOn: $store.settings.pressEnterCommand) {
@@ -577,7 +590,33 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section("Sending") {
+                Toggle(isOn: $store.settings.sendInAgentApps) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Send straight away in Wiki LLM and Planner")
+                        Text("Your words go to the agent and it answers, like a voice message.")
+                            .font(.caption)
+                            .foregroundStyle(Brand.muted)
+                    }
+                }
+                Toggle(isOn: $store.settings.spaceToSend) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Space finishes and sends while listening hands-free")
+                        Text("Or click Send on the bar. Either way Return is pressed after your text.")
+                            .font(.caption)
+                            .foregroundStyle(Brand.muted)
+                    }
+                }
+            }
             Section("Privacy") {
+                Toggle(isOn: $store.settings.learnCorrections) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Learn words I correct")
+                        Text("Rereads the text box for a minute after pasting. A word you fix is added to your dictionary. Stays on this Mac.")
+                            .font(.caption)
+                            .foregroundStyle(Brand.muted)
+                    }
+                }
                 Toggle("Keep dictation history on this Mac", isOn: $store.settings.keepHistory)
                 Toggle(isOn: $store.settings.useTextBoxContext) {
                     VStack(alignment: .leading, spacing: 1) {

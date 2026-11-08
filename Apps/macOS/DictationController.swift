@@ -1,5 +1,6 @@
 import AppKit
 import NovaVoiceCore
+import NovaVoiceLocalModel
 import Observation
 
 /// Runs a dictation from key press to pasted text, in whichever app is in front.
@@ -12,7 +13,9 @@ final class DictationController {
         case working
     }
 
-    private(set) var phase: Phase = .idle
+    private(set) var phase: Phase = .idle {
+        didSet { if phase != oldValue { broadcastState() } }
+    }
     private(set) var level: Float = 0
     private(set) var partial = ""
     private(set) var lastMessage: String?
@@ -21,10 +24,21 @@ final class DictationController {
     private let store: NovaStore
     private let capture = AudioCapture()
     private let speech = SpeechEngine()
-    private let pipeline = DictationPipeline()
+    /// The open model, when chosen instead of Apple Intelligence.
+    enum LocalModelState: Equatable {
+        case notLoaded
+        case downloading(Double)
+        case ready
+        case failed(String)
+    }
+
+    private(set) var localModelState: LocalModelState = .notLoaded
+    @ObservationIgnored private var localModel: MLXCleanupModel?
     private let hotkeys = HotkeyMonitor()
     private let hud = HUDController()
     private let scratchpad: ScratchpadController
+    /// Set by the menu bar icon, which is always on screen, so the window can open from a hotkey.
+    @ObservationIgnored var openMainWindow: (() -> Void)?
 
     private var startedAt = Date()
     private var targetApp: NSRunningApplication?
@@ -37,6 +51,10 @@ final class DictationController {
     private var stopRequested = false
     private var startTask: Task<Void, Never>?
     private var speechReady = false
+    /// Press Return once the text is in: chosen with Space, the Send button or the mic button.
+    private var sendWhenDone = false
+    /// Looks for the user's corrections to the last paste, to learn those words.
+    private var correctionCheck: Task<Void, Never>?
 
     init(store: NovaStore) {
         self.store = store
@@ -61,7 +79,50 @@ final class DictationController {
         }
     }
 
+    // MARK: - Open model
+
+    /// The open model to edit with, once it's on this Mac. Until then Apple Intelligence is used,
+    /// so a dictation never waits for a download.
+    var activeLocalModel: (any LocalTextModel)? {
+        guard store.settings.usesLocalModel, localModelState == .ready,
+            let localModel, localModel.modelID == store.settings.localModelID
+        else { return nil }
+        return localModel
+    }
+
+    /// Downloads the chosen open model the first time, then loads it.
+    func prepareLocalModel() {
+        let id = store.settings.localModelID
+        if localModel?.modelID != id {
+            if let old = localModel { Task { await old.unload() } }
+            localModel = MLXCleanupModel(modelID: id)
+            localModelState = .notLoaded
+        }
+        guard let model = localModel else { return }
+        switch localModelState {
+        case .downloading, .ready: return
+        case .notLoaded, .failed: break
+        }
+        localModelState = .downloading(0)
+        Task {
+            do {
+                try await model.load { fraction in
+                    Task { @MainActor [weak self] in
+                        guard let self, self.localModel === model,
+                            case .downloading = self.localModelState
+                        else { return }
+                        self.localModelState = .downloading(fraction)
+                    }
+                }
+                if localModel === model { localModelState = .ready }
+            } catch {
+                if localModel === model { localModelState = .failed(error.localizedDescription) }
+            }
+        }
+    }
+
     func activate() {
+        if store.settings.usesLocalModel { prepareLocalModel() }
         capture.onBuffer = { [speech] in speech.append($0) }
         capture.onLevel = { [weak self] value in
             Task { @MainActor in self?.level = value }
@@ -77,8 +138,14 @@ final class DictationController {
         hotkeys.onTrigger = { [weak self] in self?.handle($0) }
         hotkeys.onCancel = { [weak self] in self?.cancel() }
         hotkeys.isDictationActive = { [weak self] in self?.isActive ?? false }
+        hotkeys.spaceSends = { [weak self] in
+            guard let self, store.settings.spaceToSend else { return false }
+            return phase == .listening(handsFree: true, command: false)
+        }
+        hotkeys.onSend = { [weak self] in self?.finishAndSend() }
 
         startHotkeys()
+        listenForRemoteToggle()
         AppleIntelligenceEditor.prewarm()
 
         Task {
@@ -95,7 +162,7 @@ final class DictationController {
         hotkeys.pushToTalk = settings.hotkeys(for: .pushToTalk)
         let actions: [(HotkeyMonitor.Trigger, HotkeyAction)] = [
             (.handsFree, .handsFree), (.editSelection, .editSelection),
-            (.pasteLast, .pasteLast), (.scratchpad, .scratchpad),
+            (.pasteLast, .pasteLast), (.scratchpad, .scratchpad), (.openApp, .openApp),
         ]
         hotkeys.triggers =
             actions.flatMap { trigger, action in
@@ -111,12 +178,43 @@ final class DictationController {
         hotkeys.isPaused = paused
     }
 
+    // MARK: - Mic buttons in Wiki LLM and Planner
+
+    /// Their agent panels have a mic button that starts and stops hands-free dictation.
+    private func listenForRemoteToggle() {
+        DistributedNotificationCenter.default().addObserver(
+            forName: Notification.Name(RemoteControl.toggleDictation), object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                // Only from the app in front, so a background process can't turn the mic on.
+                guard RemoteControl.isAllowed(NSWorkspace.shared.frontmostApplication?.bundleIdentifier)
+                else { return }
+                guard let self else { return }
+                if case .listening(_, false) = self.phase { self.finishAndSend() } else { self.toggleHandsFree() }
+            }
+        }
+    }
+
+    /// Tells the mic button what's happening. Only sent while dictating into one of those apps.
+    private func broadcastState() {
+        guard RemoteControl.isAllowed(targetApp?.bundleIdentifier) else { return }
+        let state =
+            switch phase {
+            case .idle: "idle"
+            case .listening: "listening"
+            case .working: "working"
+            }
+        DistributedNotificationCenter.default().postNotificationName(
+            Notification.Name(RemoteControl.state), object: state, userInfo: nil, deliverImmediately: true)
+    }
+
     private func handle(_ trigger: HotkeyMonitor.Trigger) {
         switch trigger {
         case .handsFree: toggleHandsFree()
         case .editSelection: toggleCommand()
         case .pasteLast: pasteLast()
         case .scratchpad: scratchpad.toggle()
+        case .openApp: openMainWindow?()
         case .transform(let id):
             if let transform = store.settings.transforms.first(where: { $0.id == id }) {
                 Task { await run(transform) }
@@ -174,6 +272,8 @@ final class DictationController {
             ? ContextNames.extract(from: FocusContext.focusedText ?? "") : []
         partial = ""
         level = 0
+        sendWhenDone = false
+        correctionCheck?.cancel()
         stopRequested = false
         speechReady = false
         startedAt = Date()
@@ -219,6 +319,13 @@ final class DictationController {
     }
 
     // MARK: - Finishing
+
+    /// Finishes the dictation and presses Return after pasting, so a chat or agent gets it at once.
+    func finishAndSend() {
+        guard case .listening(_, false) = phase else { return }
+        sendWhenDone = true
+        endDictation()
+    }
 
     func endDictation() {
         guard case .listening = phase else { return }
@@ -271,18 +378,30 @@ final class DictationController {
         let command = settings.pressEnterCommand ? VoiceCommands.splitPressEnter(raw) : (raw, false)
         let bundleID = targetApp?.bundleIdentifier
         let style = AppCatalog.style(forBundleID: bundleID, host: targetHost, settings: settings)
-        let result = await pipeline.process(
-            raw: command.0, style: style, category: AppCatalog.category(forBundleID: bundleID, host: targetHost),
+        let category = AppCatalog.category(forBundleID: bundleID, host: targetHost)
+        // Primary model, then the fallback. While the open model is still downloading, Apple
+        // Intelligence stands in, so a dictation never waits for it.
+        let localModel = activeLocalModel
+        var order = settings.engineOrder
+        if localModel == nil, !order.contains(.appleIntelligence) { order.append(.appleIntelligence) }
+        let result = await DictationPipeline(localModel: localModel, order: order).process(
+            raw: command.0, style: style, category: category,
             locale: locale, dictionary: store.dictionary, snippets: store.snippets,
-            useAppleIntelligence: settings.useAppleIntelligence, contextTerms: contextTerms)
+            useAppleIntelligence: settings.useAppleIntelligence, contextTerms: contextTerms,
+            personalContext: PersonalContext.instructions(
+                notes: settings.personalNotes, writingSample: settings.writingSample,
+                category: category, style: style))
 
+        // Wiki LLM and Planner send straight away, like a voice message in WhatsApp.
+        let send =
+            command.1 || sendWhenDone || (settings.sendInAgentApps && RemoteControl.isAllowed(bundleID))
         if result.text.isEmpty {
             // "Press enter" on its own.
-            if command.1 { paste("", thenPressEnter: true) }
+            if send { paste("", thenPressEnter: true) }
             return
         }
 
-        paste(result.text, thenPressEnter: command.1)
+        paste(result.text, thenPressEnter: send, learnFromEdits: !send)
         store.record(
             DictationRecord(
                 raw: raw, final: result.text, appName: targetHost ?? targetApp?.localizedName,
@@ -329,7 +448,7 @@ final class DictationController {
         paste(last.final)
     }
 
-    func paste(_ text: String, thenPressEnter: Bool = false) {
+    func paste(_ text: String, thenPressEnter: Bool = false, learnFromEdits: Bool = false) {
         targetApp?.activate()
         guard TextInserter.isTrusted else {
             TextInserter.putOnClipboard(text)
@@ -352,8 +471,44 @@ final class DictationController {
                 showMessage("No text box in focus. Your text is on the clipboard: press ⌘V")
             case .pasted:
                 if thenPressEnter { TextInserter.pressReturn() }
+                if learnFromEdits, store.settings.learnCorrections { watchForCorrections(of: text) }
             }
         }
+    }
+
+    // MARK: - Learning from corrections
+
+    /// Reads the text box a few times over the next minute. If the user fixed a word in what was
+    /// pasted, that word goes in the dictionary, which the recogniser is given as vocabulary.
+    private func watchForCorrections(of pasted: String) {
+        correctionCheck?.cancel()
+        guard let element = FocusContext.focusedTextElement else { return }
+        correctionCheck = Task { [weak self] in
+            // Checks at about 6, 15, 30 and 60 seconds after the paste.
+            for delay in [6, 9, 15, 30] {
+                try? await Task.sleep(for: .seconds(delay))
+                guard !Task.isCancelled, let self else { return }
+                guard let text = FocusContext.text(of: element) else { return }
+                let known = store.dictionary.map(\.term)
+                let learned = CorrectionLearner.learnedWords(pasted: pasted, fieldText: text, known: known)
+                if !learned.isEmpty {
+                    store.dictionary.append(contentsOf: learned.map { DictionaryEntry(term: $0) })
+                    let list = learned.map { "“\($0)”" }.joined(separator: ", ")
+                    showMessage("Added \(list) to your dictionary")
+                    return
+                }
+            }
+        }
+    }
+
+    // MARK: - Fn key
+
+    /// True when pressing Fn also does something of its own, such as opening Emoji & Symbols.
+    /// Then each press for dictation moves focus to that window, and the text goes there.
+    var fnKeyHasSystemAction: Bool {
+        let usesFn = store.settings.hotkeys(for: .pushToTalk).contains { $0.tokens.contains(.fn) }
+            || store.settings.hotkeys(for: .handsFree).contains { $0.tokens.contains(.fn) }
+        return usesFn && FnKeySetting.current != .doNothing
     }
 
     private func showMessage(_ message: String) {

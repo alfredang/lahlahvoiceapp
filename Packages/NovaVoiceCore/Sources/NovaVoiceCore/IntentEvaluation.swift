@@ -63,9 +63,11 @@ public enum IntentEvaluation {
         public let usedAppleIntelligence: Int
     }
 
-    public static func run(locale: Locale) async -> Report {
-        let pipeline = DictationPipeline()
-        print("Apple Intelligence: \(AppleIntelligenceEditor.status.title)")
+    public static func run(locale: Locale, localModel: (any LocalTextModel)? = nil) async -> Report {
+        let pipeline = DictationPipeline(localModel: localModel)
+        if localModel == nil {
+            print("Apple Intelligence: \(AppleIntelligenceEditor.status.title)")
+        }
         var lines: [String] = []
         var passed = 0
         var usedAI = 0

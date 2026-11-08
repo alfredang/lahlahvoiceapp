@@ -3,7 +3,7 @@ import Foundation
 /// How the final text should sound. Applied by Apple Intelligence when it is available,
 /// and approximated deterministically when it is not.
 public enum WritingStyle: String, Codable, CaseIterable, Identifiable, Sendable {
-    case polished, casual, veryCasual, enthusiastic, verbatim
+    case polished, casual, veryCasual, enthusiastic, verbatim, clear
 
     public var id: String { rawValue }
 
@@ -14,6 +14,7 @@ public enum WritingStyle: String, Codable, CaseIterable, Identifiable, Sendable 
         case .veryCasual: "Very casual"
         case .enthusiastic: "Enthusiastic"
         case .verbatim: "As spoken"
+        case .clear: "Clear and concise"
         }
     }
 
@@ -24,6 +25,7 @@ public enum WritingStyle: String, Codable, CaseIterable, Identifiable, Sendable 
         case .veryCasual: "Lowercase and relaxed, with no final full stop. Good for close friends."
         case .enthusiastic: "Warm and upbeat, without overdoing it."
         case .verbatim: "Removes fillers and applies your corrections, but keeps your wording."
+        case .clear: "Turns rambling into clear sentences that say what you meant, keeping every point. Good for AI chats."
         }
     }
 }

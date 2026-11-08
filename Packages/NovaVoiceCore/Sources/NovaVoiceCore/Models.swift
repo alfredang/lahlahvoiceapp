@@ -61,12 +61,15 @@ public struct VoiceNote: Codable, Identifiable, Hashable, Sendable {
     public var title: String
     public var transcript: String
     public var summary: String?
+    /// The transcript tidied into what was meant, when Apple Intelligence could do it.
+    public var cleaned: String?
     public var durationSeconds: Double
 
     public init(
         id: UUID = UUID(), date: Date = Date(), title: String, transcript: String,
-        summary: String? = nil, durationSeconds: Double
+        summary: String? = nil, cleaned: String? = nil, durationSeconds: Double
     ) {
+        self.cleaned = cleaned
         self.id = id
         self.date = date
         self.title = title
@@ -77,8 +80,28 @@ public struct VoiceNote: Codable, Identifiable, Hashable, Sendable {
 }
 
 public struct NovaSettings: Codable, Equatable, Sendable {
+    /// The engines to try for each dictation, in order: the primary model, then the fallback.
+    public var engineOrder: [CleanupEngine] {
+        var order = [cleanupEngine]
+        if let fallbackEngine, fallbackEngine != cleanupEngine { order.append(fallbackEngine) }
+        return order
+    }
+
+    /// True when the open model is the primary or the fallback, so it should be downloaded.
+    public var usesLocalModel: Bool { engineOrder.contains(.localModel) }
+
     public var localeIdentifier: String
     public var useAppleIntelligence: Bool
+    /// Apple Intelligence by default. An open model is opt-in and downloaded on first use.
+    public var cleanupEngine: CleanupEngine
+    public var localModelID: String
+    /// Tried when the primary model is unavailable, declines or gives an unfaithful edit. Nil:
+    /// no fallback (the rule-based text is kept). Only one open model is used at a time, so the
+    /// fallback is always the other kind of engine.
+    public var fallbackEngine: CleanupEngine?
+    /// About you: notes every dictation should know, and a sample of how you write.
+    public var personalNotes: [PersonalNote]
+    public var writingSample: String
     public var keepHistory: Bool
     public var defaultStyle: WritingStyle
     /// Style per app category on macOS. Missing categories use the catalog default.
@@ -102,10 +125,22 @@ public struct NovaSettings: Codable, Equatable, Sendable {
     public var pressEnterCommand: Bool
     /// Reads names from the focused text box to spell them correctly. Stays on this Mac.
     public var useTextBoxContext: Bool
+    /// Wiki LLM and Planner: press Return after pasting, so the agent answers straight away.
+    public var sendInAgentApps: Bool
+    /// While listening hands-free, Space finishes and sends, like a chat app's voice message.
+    public var spaceToSend: Bool
+    /// Learns a word when you correct how it was heard, so it's written right next time. Reads
+    /// the text box again after a paste, on this Mac only, so it's off until turned on.
+    public var learnCorrections: Bool
 
     public init(
         localeIdentifier: String = Locale.current.identifier,
         useAppleIntelligence: Bool = true,
+        cleanupEngine: CleanupEngine = .appleIntelligence,
+        localModelID: String = LocalModelOption.defaultID,
+        fallbackEngine: CleanupEngine? = nil,
+        personalNotes: [PersonalNote] = [],
+        writingSample: String = "",
         keepHistory: Bool = true,
         defaultStyle: WritingStyle = .casual,
         categoryStyles: [String: WritingStyle] = [:],
@@ -119,10 +154,18 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         playSounds: Bool = true,
         muteWhileDictating: Bool = false,
         pressEnterCommand: Bool = false,
-        useTextBoxContext: Bool = false
+        useTextBoxContext: Bool = false,
+        sendInAgentApps: Bool = true,
+        spaceToSend: Bool = true,
+        learnCorrections: Bool = false
     ) {
         self.localeIdentifier = localeIdentifier
         self.useAppleIntelligence = useAppleIntelligence
+        self.cleanupEngine = cleanupEngine
+        self.localModelID = localModelID
+        self.fallbackEngine = fallbackEngine
+        self.personalNotes = personalNotes
+        self.writingSample = writingSample
         self.keepHistory = keepHistory
         self.defaultStyle = defaultStyle
         self.categoryStyles = categoryStyles
@@ -137,6 +180,9 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         self.muteWhileDictating = muteWhileDictating
         self.pressEnterCommand = pressEnterCommand
         self.useTextBoxContext = useTextBoxContext
+        self.sendInAgentApps = sendInAgentApps
+        self.spaceToSend = spaceToSend
+        self.learnCorrections = learnCorrections
     }
 
     /// Reads settings saved by any earlier version. Anything missing takes its default.
@@ -145,6 +191,11 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         let base = NovaSettings()
         localeIdentifier = try values.decodeIfPresent(String.self, forKey: .localeIdentifier) ?? base.localeIdentifier
         useAppleIntelligence = try values.decodeIfPresent(Bool.self, forKey: .useAppleIntelligence) ?? base.useAppleIntelligence
+        cleanupEngine = try values.decodeIfPresent(CleanupEngine.self, forKey: .cleanupEngine) ?? base.cleanupEngine
+        localModelID = try values.decodeIfPresent(String.self, forKey: .localModelID) ?? base.localModelID
+        fallbackEngine = try values.decodeIfPresent(CleanupEngine.self, forKey: .fallbackEngine)
+        personalNotes = try values.decodeIfPresent([PersonalNote].self, forKey: .personalNotes) ?? []
+        writingSample = try values.decodeIfPresent(String.self, forKey: .writingSample) ?? ""
         keepHistory = try values.decodeIfPresent(Bool.self, forKey: .keepHistory) ?? base.keepHistory
         defaultStyle = try values.decodeIfPresent(WritingStyle.self, forKey: .defaultStyle) ?? base.defaultStyle
         categoryStyles = try values.decodeIfPresent([String: WritingStyle].self, forKey: .categoryStyles) ?? [:]
@@ -159,6 +210,9 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         muteWhileDictating = try values.decodeIfPresent(Bool.self, forKey: .muteWhileDictating) ?? false
         pressEnterCommand = try values.decodeIfPresent(Bool.self, forKey: .pressEnterCommand) ?? false
         useTextBoxContext = try values.decodeIfPresent(Bool.self, forKey: .useTextBoxContext) ?? false
+        sendInAgentApps = try values.decodeIfPresent(Bool.self, forKey: .sendInAgentApps) ?? base.sendInAgentApps
+        spaceToSend = try values.decodeIfPresent(Bool.self, forKey: .spaceToSend) ?? base.spaceToSend
+        learnCorrections = try values.decodeIfPresent(Bool.self, forKey: .learnCorrections) ?? base.learnCorrections
     }
 
     public func hotkeys(for action: HotkeyAction) -> [Hotkey] {

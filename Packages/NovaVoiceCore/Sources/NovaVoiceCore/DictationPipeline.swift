@@ -20,7 +20,9 @@ public enum AppCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     public var defaultStyle: WritingStyle {
         switch self {
         case .messaging, .other: .casual
-        case .ai, .code: .verbatim
+        // Prompts read best as clear questions. Code keeps exact wording for names and terms.
+        case .ai: .clear
+        case .code: .verbatim
         case .email, .documents: .polished
         }
     }
@@ -28,7 +30,7 @@ public enum AppCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     public var examples: String {
         switch self {
         case .messaging: "WhatsApp, Telegram, Messages, Slack, Teams, Discord, WeChat, Signal"
-        case .ai: "ChatGPT, Claude, Perplexity"
+        case .ai: "ChatGPT, Claude, Perplexity, Wiki LLM, Planner"
         case .email: "Mail, Outlook"
         case .documents: "Notes, Pages, Word, Notion"
         case .code: "Xcode, VS Code, Cursor, Terminal"
@@ -47,6 +49,10 @@ public enum AppCatalog {
         "com.hnc.Discord": .messaging, "com.tencent.xinWeChat": .messaging,
         "org.whispersystems.signal-desktop": .messaging,
         "com.openai.chat": .ai, "com.openai.codex": .ai, "com.anthropic.claudefordesktop": .ai,
+        // Wiki LLM: speech goes to its Claude Code agent, and questions are recorded verbatim.
+        "com.tertiaryinfotech.markdownapp": .ai,
+        // Planner: speech goes to its Hermes agent, which reads to-dos and appointments.
+        "com.tertiaryinfotech.plannerapp": .ai,
         "ai.perplexity.mac": .ai, "com.apple.mail": .email, "com.microsoft.Outlook": .email,
         "com.apple.Notes": .documents, "com.apple.iWork.Pages": .documents,
         "com.microsoft.Word": .documents, "notion.id": .documents,
@@ -92,6 +98,26 @@ public enum AppCatalog {
     }
 }
 
+/// Lets a few of our own Mac apps start and stop dictation from a button of their own, the way
+/// their agent panels offer a mic. They post `toggleDictation`, and LahLah Voice answers by
+/// posting `state` with "listening", "working" or "idle" so the button can show it.
+///
+/// Distributed notifications reach any process on this Mac, so a toggle only counts while one
+/// of these apps is in front: something running in the background can't start the microphone.
+public enum RemoteControl {
+    public static let toggleDictation = "com.tertiaryinfotech.lahlahvoice.toggleDictation"
+    public static let state = "com.tertiaryinfotech.lahlahvoice.state"
+
+    /// Wiki LLM and Planner.
+    public static let allowedBundleIDs: Set<String> = [
+        "com.tertiaryinfotech.markdownapp", "com.tertiaryinfotech.plannerapp",
+    ]
+
+    public static func isAllowed(_ bundleID: String?) -> Bool {
+        bundleID.map(allowedBundleIDs.contains) ?? false
+    }
+}
+
 /// What the speaker said, what they meant, and how the result was produced.
 public struct DictationResult: Sendable {
     public let raw: String
@@ -102,14 +128,18 @@ public struct DictationResult: Sendable {
 /// raw transcript → snippet check → rules → Apple Intelligence → dictionary fixes
 public struct DictationPipeline: Sendable {
     private let cleaner = TranscriptCleaner()
-    private let editor = AppleIntelligenceEditor()
+    private let editor: AppleIntelligenceEditor
 
-    public init() {}
+    /// With a local model, the editing step uses it instead of Apple Intelligence. With an order,
+    /// the engines are tried in turn: the primary model, then the fallback.
+    public init(localModel: (any LocalTextModel)? = nil, order: [CleanupEngine]? = nil) {
+        editor = AppleIntelligenceEditor(localModel: localModel, order: order)
+    }
 
     public func process(
         raw: String, style: WritingStyle, category: AppCategory? = nil, locale: Locale,
         dictionary: [DictionaryEntry], snippets: [Snippet], useAppleIntelligence: Bool,
-        contextTerms: [String] = []
+        contextTerms: [String] = [], personalContext: String = ""
     ) async -> DictationResult {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
@@ -134,7 +164,8 @@ public struct DictationPipeline: Sendable {
         if useAppleIntelligence, style != .verbatim || ruled != trimmed {
             let terms = dictionary.map(\.term) + contextTerms
             if let edited = await editor.edit(
-                protected, style: style, category: category, locale: locale, dictionary: terms),
+                protected, style: style, category: category, locale: locale, dictionary: terms,
+                personalContext: personalContext),
                 placeholders.keys.allSatisfy({ edited.contains($0) })
             {
                 finalText = edited

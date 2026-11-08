@@ -47,7 +47,7 @@ public struct HotkeyToken: Codable, Hashable, Sendable {
     }
 
     private static let keyNames: [Int: String] = [
-        63: "Fn", 59: "Left Control", 62: "Right Control", 58: "Left Option", 61: "Right Option",
+        63: "🌐 Fn", 59: "Left Control", 62: "Right Control", 58: "Left Option", 61: "Right Option",
         55: "Left Command", 54: "Right Command", 56: "Left Shift", 60: "Right Shift",
         0: "A", 11: "B", 8: "C", 2: "D", 14: "E", 3: "F", 5: "G", 4: "H", 34: "I", 38: "J", 40: "K",
         37: "L", 46: "M", 45: "N", 31: "O", 35: "P", 12: "Q", 15: "R", 1: "S", 17: "T", 32: "U",
@@ -142,7 +142,7 @@ public enum HotkeyProblem: Equatable, Sendable {
 
 /// Everything a hotkey can do, besides running a transform.
 public enum HotkeyAction: String, Codable, CaseIterable, Identifiable, Sendable {
-    case pushToTalk, handsFree, editSelection, pasteLast, scratchpad
+    case pushToTalk, handsFree, editSelection, pasteLast, scratchpad, openApp
 
     public var id: String { rawValue }
 
@@ -153,6 +153,7 @@ public enum HotkeyAction: String, Codable, CaseIterable, Identifiable, Sendable 
         case .editSelection: "Edit selection"
         case .pasteLast: "Paste last dictation"
         case .scratchpad: "Open scratchpad"
+        case .openApp: "Open LahLah Voice"
         }
     }
 
@@ -163,6 +164,7 @@ public enum HotkeyAction: String, Codable, CaseIterable, Identifiable, Sendable 
         case .editSelection: "Select some text, press this, then say how to change it."
         case .pasteLast: "Puts your most recent dictation in the app in front."
         case .scratchpad: "Opens a small floating window to dictate rough notes into."
+        case .openApp: "Brings up the LahLah Voice window from any app."
         }
     }
 
@@ -173,6 +175,8 @@ public enum HotkeyAction: String, Codable, CaseIterable, Identifiable, Sendable 
         case .editSelection: [Hotkey([.leftOption, .key(19)])]
         case .pasteLast: [Hotkey([.leftOption, .key(20)])]
         case .scratchpad: [Hotkey([.leftOption, .key(21)])]
+        // L for LahLah.
+        case .openApp: [Hotkey([.leftOption, .key(37)])]
         }
     }
 }

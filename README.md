@@ -2,15 +2,17 @@
 
 Say what you mean, in any app. LahLah Voice turns natural speech into finished text: it removes pause
 fillers and false starts, follows spoken corrections ("Tuesday, no wait, Wednesday"), and writes what
-you intended. Everything runs on the device, using Apple's speech recognition and Apple Intelligence.
+you intended. Everything runs on the device, using Apple's speech recognition and Apple Intelligence,
+with an optional open model (Qwen3.5 through MLX) as the primary model or the fallback.
 
 ![LahLah Voice on the Mac](screenshot.png)
 
 | | Mac | iPhone |
 |---|---|---|
 | Works in | Any app, by pasting into the focused text field | Any app, through a custom keyboard |
-| Start dictating | Hold Fn, double-tap it, or press Option+1 | Tap Speak on the keyboard |
+| Start dictating | Hold 🌐 Fn, double-tap it, or press Option+1 | Tap Speak on the keyboard |
 | Edit by voice | Option+2 on selected text | Not available |
+| Models | Apple Intelligence, Qwen3.5 2B, 4B or 9B; primary + fallback | Apple Intelligence, Qwen3.5 2B; primary + fallback |
 | Style | Automatic per app category | Chosen on the keyboard |
 | Distribution | Notarized DMG (Developer ID) | App Store |
 
@@ -20,21 +22,28 @@ Website: <https://alfredang.github.io/lahlahvoice/>
 
 - **Hotkeys you choose:** hold to talk, hands-free, edit selection, paste last dictation and open
   scratchpad. Combinations can use up to 3 keys or a mouse button. The defaults are below.
-- **Transforms:** saved instructions that rewrite selected text with one key press.
+- **Transforms:** saved instructions that rewrite selected text with one key press. A hotkey you
+  press while setting one is kept even if you leave the page.
 - **Scratchpad:** a floating window for rough notes.
 - **Personalize:** dictionary, snippets, and a writing style for each type of app.
 - **Notes and insights:** voice notes with Apple Intelligence summaries, and usage by app.
+- **Wiki LLM and Planner:** their agent panels have a mic button that starts and stops hands-free
+  dictation into the agent's terminal. It works over a local notification (`RemoteControl`) that's
+  only accepted while one of those two apps is in front.
 - **Optional settings:** start and stop sounds, muting speakers while dictating, a "press enter" voice
   command, and spelling names from the text box you're writing in.
 
 | Default key | Action |
 |---|---|
-| Hold Fn | Dictate until you let go |
-| Double-tap Fn, or Option+1 | Hands-free; press again to stop |
+| Hold 🌐 Fn | Dictate until you let go |
+| Double-tap 🌐 Fn, or Option+1 | Hands-free; press again to stop |
 | Option+2 | Speak an edit to the selected text |
 | Option+3 | Paste your last dictation |
 | Option+4 | Open the scratchpad |
 | Esc | Cancel |
+
+While Fn is a LahLah hotkey, its 🌐 press is kept from the app in front, so it never opens Emoji &
+Symbols over the listening pill.
 
 ## How it works
 
@@ -47,6 +56,11 @@ Microphone → SpeechAnalyzer (on-device) → rule-based cleanup → Foundation 
 - **Apple Intelligence** (`AppleIntelligenceEditor`) then recovers intent and adjusts tone. Its output
   is rejected if it drifts from what was said, such as answering a dictated question or inventing a
   number. Any failure falls back to the rule-based text, so dictation still works.
+- **Primary and fallback model** (Settings › Dictation): Apple Intelligence or an open Qwen3.5 model
+  (`MLXCleanupModel`, downloaded once from Hugging Face) as the primary, and the other as the
+  fallback. The fallback runs when the primary is unavailable, declines, or fails the faithfulness
+  check. On the iPhone the model runs on the CPU in the background (iOS allows no GPU work there) and
+  is skipped when less than 2.5 GB of memory is free.
 - **Pasting** puts the text on the clipboard as a promise, which only an app can fulfil by asking for
   it. If nothing asks, the paste failed, so the text stays on the clipboard and a message says so.
   Password fields are refused.
@@ -107,7 +121,8 @@ the Mac's Apple Intelligence setting is off. Test the full keyboard flow on a re
 - Note taking records the microphone only. It doesn't capture system audio from calls.
 - Understanding intent needs Apple Intelligence (iPhone 15 Pro or later, or an Apple silicon Mac).
   Other devices get the rule-based cleanup, which is English-focused.
-- iOS can rate-limit the on-device model for apps in the background. Dictation then uses the rules.
+- iOS can rate-limit the on-device model for apps in the background. With Qwen as the fallback the
+  open model takes over; without it, dictation uses the rules.
 
 ## Privacy and terms
 

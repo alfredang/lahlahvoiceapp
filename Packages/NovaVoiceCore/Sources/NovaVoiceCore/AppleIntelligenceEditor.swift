@@ -55,7 +55,17 @@ struct NoteSummary {
 /// Foundation Models language model. Every failure path returns `nil`, and the caller keeps the
 /// rule-based text, so dictation never fails because the model did.
 public struct AppleIntelligenceEditor: Sendable {
-    public init() {}
+    /// The open model, when it is the primary or the fallback and is loaded.
+    private let localModel: (any LocalTextModel)?
+    /// Engines to try in turn. The next one runs when the one before is unavailable, declines
+    /// or gives an unfaithful edit.
+    private let order: [CleanupEngine]
+
+    /// With a local model and no order given, the open model is used on its own (as before).
+    public init(localModel: (any LocalTextModel)? = nil, order: [CleanupEngine]? = nil) {
+        self.localModel = localModel
+        self.order = order ?? [localModel == nil ? .appleIntelligence : .localModel]
+    }
 
     public static var status: IntelligenceStatus {
         switch SystemLanguageModel.default.availability {
@@ -81,16 +91,39 @@ public struct AppleIntelligenceEditor: Sendable {
 
     public func edit(
         _ text: String, style: WritingStyle, category: AppCategory?, locale: Locale,
-        dictionary: [String]
+        dictionary: [String], personalContext: String = ""
     ) async -> String? {
-        guard Self.status == .available, Self.supports(locale), !text.isEmpty else { return nil }
+        guard !text.isEmpty else { return nil }
+        for engine in order {
+            switch engine {
+            case .appleIntelligence:
+                guard Self.status == .available, Self.supports(locale) else { continue }
+            case .localModel:
+                guard localModel != nil else { continue }   // not downloaded yet
+            }
+            if let edited = await edit(
+                text, with: engine, style: style, category: category, dictionary: dictionary,
+                personalContext: personalContext)
+            {
+                return edited
+            }
+            #if DEBUG
+            print("\(engine.title) gave no edit; trying the next model")
+            #endif
+        }
+        return nil
+    }
 
-        let chunks = Self.chunks(of: text)
+    private func edit(
+        _ text: String, with engine: CleanupEngine, style: WritingStyle, category: AppCategory?,
+        dictionary: [String], personalContext: String
+    ) async -> String? {
         var edited: [String] = []
-        for chunk in chunks {
+        for chunk in Self.chunks(of: text) {
             guard
                 let result = await editChunk(
-                    chunk, style: style, category: category, dictionary: dictionary)
+                    chunk, with: engine, style: style, category: category, dictionary: dictionary,
+                    personalContext: personalContext)
             else { return nil }
             edited.append(result)
         }
@@ -98,19 +131,48 @@ public struct AppleIntelligenceEditor: Sendable {
     }
 
     private func editChunk(
-        _ text: String, style: WritingStyle, category: AppCategory?, dictionary: [String]
+        _ text: String, with engine: CleanupEngine, style: WritingStyle, category: AppCategory?,
+        dictionary: [String], personalContext: String
     ) async -> String? {
-        let session = LanguageModelSession(
-            instructions: Self.instructions(style: style, category: category))
+        var instructions = Self.instructions(style: style, category: category)
+        if !personalContext.isEmpty { instructions += "\n\n" + personalContext }
         let vocabulary =
             dictionary.isEmpty
             ? "" : "\nSpell these words exactly this way: \(dictionary.prefix(40).joined(separator: ", "))"
-        let prompt = "Rewrite this dictation.\(vocabulary)\n\nDICTATION:\n\(text)"
+        let task =
+            style == .clear
+            ? "Rewrite this dictation clearly and concisely, as the speaker would have typed it. "
+                + "Remove thinking-aloud words such as okay, so, right? and and then you say that. "
+                + "Keep every point and question."
+            : "Rewrite this dictation."
+        let prompt = "\(task)\(vocabulary)\n\nDICTATION:\n\(text)"
+
+        if engine == .localModel, let localModel {
+            // Open models have no structured output here, so the reply is cleaned of labels,
+            // quotes and any thinking before the same faithfulness check.
+            let request =
+                prompt + "\n\nReply with only the finished text. No label, quotes or comments."
+            do {
+                let reply = try await localModel.respond(
+                    instructions: instructions, prompt: request,
+                    maxTokens: max(256, text.count / 2))
+                let output = Self.withoutRecitedDictionary(Self.plainReply(reply), dictionary)
+                return Self.isFaithful(output, to: text, style: style) ? output : nil
+            } catch {
+                #if DEBUG
+                print("Local model failed:", error)
+                #endif
+                return nil
+            }
+        }
+
+        let session = LanguageModelSession(instructions: instructions)
         do {
             let response = try await session.respond(
                 to: prompt, generating: EditedDictation.self,
                 options: GenerationOptions(sampling: .greedy, temperature: 0.1))
-            let output = response.content.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let output = Self.withoutRecitedDictionary(
+                response.content.text.trimmingCharacters(in: .whitespacesAndNewlines), dictionary)
             return Self.isFaithful(output, to: text, style: style) ? output : nil
         } catch {
             // Guardrails, rate limits (common in the background) and context overflow all end
@@ -142,6 +204,7 @@ public struct AppleIntelligenceEditor: Sendable {
         - Keep the speaker's language. Do not translate.
         \(styleRule(style))
         \(categoryRule(category))
+        \(style == .clear ? clearExamples : "")
 
         Examples:
         Dictation: um so can you uh can you send me the the report by friday
@@ -179,8 +242,31 @@ public struct AppleIntelligenceEditor: Sendable {
             "- Tone: warm and upbeat. An occasional exclamation mark is fine."
         case .verbatim:
             "- Tone: keep the speaker's own wording wherever you can. Change only what the rules above require."
+        case .clear:
+            """
+            - Tone: clear and concise. The speaker was thinking aloud. Write what they meant in \
+            short, well-formed sentences, as they would have typed it.
+            - Drop thinking-aloud phrases and tag questions: so, okay, right?, kind of, basically, \
+            I think I roughly, and then you say that, it turns out that.
+            - Say each point once. Merge repeated or restarted sentences into one.
+            - Fix words the speech recogniser clearly misheard, when the topic makes the intended \
+            word obvious, for example "irreputable representation" → "irreducible representation".
+            - Keep every point, step, example and question, in the speaker's order and voice (I, you). \
+            This is not a summary: nothing the speaker asked or said may be lost.
+            """
         }
     }
+
+    /// Worked examples for the clear style. The small model follows examples better than rules.
+    private static let clearExamples = """
+        Dictation: okay so I think I get it so basically the cache is you know it's per user right and \
+        then you said that each request kind of checks it first but how does the expiry work I don't get that
+        Text: I think I get it: the cache is per user, and each request checks it first. But how does the expiry work?
+
+        Dictation: so for the launch we need the we need the banner and the um the email and then \
+        it turns out the email has to go out on Monday no Tuesday so can you draft it
+        Text: For the launch we need the banner and the email. The email has to go out on Tuesday. Can you draft it?
+        """
 
     private static func categoryRule(_ category: AppCategory?) -> String {
         switch category {
@@ -214,6 +300,8 @@ public struct AppleIntelligenceEditor: Sendable {
         // A list the rules already formatted must stay a list.
         if input.contains("\n"), !output.contains("\n") { return false }
 
+        if repeatsItself(outputWords, input: inputWords) { return false }
+
         let overlap = outputWords.filter { inputWords.contains($0) }.count
         guard Double(overlap) / Double(outputWords.count) >= 0.6 else { return false }
 
@@ -222,16 +310,83 @@ public struct AppleIntelligenceEditor: Sendable {
         // Corrections can legitimately remove words, but the rules have already applied most.
         let outputSet = Set(outputWords)
         let kept = inputWords.filter { outputSet.contains($0) }.count
-        return Double(kept) / Double(inputWords.count) >= 0.5
+        // Clear rewrites drop thinking-aloud words, so less of the speech survives word for word.
+        return Double(kept) / Double(inputWords.count) >= (style == .clear ? 0.3 : 0.5)
     }
 
+    /// Models sometimes return the whole text twice. That only stands if the speaker really
+    /// said most of it twice. (The same check OpenWhispr added after doubled pastes.)
+    private static func repeatsItself(_ words: [String], input: [String]) -> Bool {
+        guard words.count >= 12, words.count % 2 == 0 else { return false }
+        let half = words.count / 2
+        guard Array(words[..<half]) == Array(words[half...]) else { return false }
+        var counts: [String: Int] = [:]
+        for word in input { counts[word, default: 0] += 1 }
+        let saidTwice = words[..<half].filter { word in
+            guard let count = counts[word], count >= 2 else { return false }
+            counts[word] = count - 2
+            return true
+        }.count
+        return saidTwice * 2 <= half
+    }
+
+    /// Strips what open models wrap around an answer: a thinking block, a "Text:" label, quotes.
+    static func plainReply(_ reply: String) -> String {
+        var text = reply
+        if let end = text.range(of: "</think>") { text = String(text[end.upperBound...]) }
+        text = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        for label in ["Text:", "Edited text:", "Finished text:", "Cleaned transcript:", "Output:"]
+        where text.lowercased().hasPrefix(label.lowercased()) {
+            text = String(text.dropFirst(label.count)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        if text.count > 1, let first = text.first, let last = text.last,
+            (first == "\"" && last == "\"") || (first == "“" && last == "”")
+        {
+            text = String(text.dropFirst().dropLast())
+        }
+        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Models sometimes recite the spelling list after the last sentence. Drop a final line made
+    /// up only of dictionary words.
+    static func withoutRecitedDictionary(_ text: String, _ dictionary: [String]) -> String {
+        guard dictionary.count >= 2 else { return text }
+        var lines = text.components(separatedBy: "\n")
+        guard lines.count >= 2, let last = lines.last else { return text }
+        let known = Set(dictionary.map { $0.lowercased() })
+        let items = last.split { ",;".contains($0) }
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines.union(.punctuationCharacters)).lowercased() }
+            .filter { !$0.isEmpty }
+        guard items.count >= 2, items.allSatisfy(known.contains) else { return text }
+        lines.removeLast()
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Words for comparison. Spoken numbers count as their digits, so "one" matches "1".
     private static func contentWords(_ text: String) -> [String] {
-        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map(String.init)
+        text.lowercased().split { !$0.isLetter && !$0.isNumber }.map { word in
+            let word = String(word)
+            return cardinals.contains(word) ? numberWords[word] ?? word : word
+        }
     }
 
+    private static let cardinals: Set<String> = [
+        "zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
+        "eleven", "twelve",
+    ]
+
+    /// Digit runs, plus spoken numbers such as "one" written as "1". Superscripts like ² split off.
     private static func numbers(in text: String) -> Set<String> {
-        Set(text.split { !$0.isNumber }.map(String.init))
+        let digits = text.split { !($0.isASCII && $0.isNumber) }.map(String.init)
+        let spoken = text.lowercased().split { !$0.isLetter }.compactMap { numberWords[String($0)] }
+        return Set(digits + spoken)
     }
+
+    private static let numberWords: [String: String] = [
+        "zero": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+        "seven": "7", "eight": "8", "nine": "9", "ten": "10", "eleven": "11", "twelve": "12",
+        "square": "2", "squared": "2", "cubed": "3", "first": "1", "second": "2", "third": "3",
+    ]
 
     private static func listMarkers(in text: String) -> Set<String> {
         let lines = text.split(separator: "\n")

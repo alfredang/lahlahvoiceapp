@@ -41,19 +41,28 @@ struct HotkeyCaps: View {
 }
 
 /// Captures a new combination: everything held at the moment the keys are all let go.
+///
+/// One recorder serves every row, so only one row records at a time. Starting another row,
+/// leaving the page or switching to another app ends the recording and keeps the combination
+/// already pressed, so nothing is lost and no row is left stuck on "Press keys…".
 @MainActor
 @Observable
 final class HotkeyCapture {
-    private(set) var isRecording = false
+    static let shared = HotkeyCapture()
+
+    private(set) var owner: UUID?
     private(set) var peak: Set<HotkeyToken> = []
     private var pressed: Set<HotkeyToken> = []
     private var monitor: Any?
+    private var resignObserver: Any?
     private var onFinish: ((Hotkey?) -> Void)?
 
-    func start(onFinish: @escaping (Hotkey?) -> Void) {
-        stop()
+    func isRecording(_ id: UUID) -> Bool { owner == id }
+
+    func start(owner id: UUID, onFinish: @escaping (Hotkey?) -> Void) {
+        commit()
+        owner = id
         self.onFinish = onFinish
-        isRecording = true
         peak = []
         pressed = []
         monitor = NSEvent.addLocalMonitorForEvents(
@@ -62,15 +71,35 @@ final class HotkeyCapture {
             self?.handle(event)
             return nil
         }
+        // Key releases in another app never reach us: finish with what was pressed.
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated { self?.commit() }
+        }
     }
 
-    func stop() {
+    /// Ends the recording (only `id`'s, when given), saving a combination already pressed.
+    func commit(owner id: UUID? = nil) {
+        guard let owner, id == nil || owner == id else { return }
+        finish(peak.isEmpty ? nil : Hotkey(Array(peak)))
+    }
+
+    private func stop() {
         if let monitor { NSEvent.removeMonitor(monitor) }
+        if let resignObserver { NotificationCenter.default.removeObserver(resignObserver) }
         monitor = nil
-        isRecording = false
+        resignObserver = nil
+        owner = nil
+        peak = []
+        pressed = []
     }
 
     private func handle(_ event: NSEvent) {
+        // The 🌐 key's own press: it is recorded as Fn, from its modifier change.
+        if event.type == .keyDown || event.type == .keyUp,
+            event.keyCode == UInt16(HotkeyMonitor.globeKeyCode)
+        { return }
         switch event.type {
         case .flagsChanged:
             let modifiers = HotkeyToken.modifiers(rawFlags: UInt64(event.modifierFlags.rawValue))
@@ -96,6 +125,7 @@ final class HotkeyCapture {
 
     private func finish(_ hotkey: Hotkey?) {
         let onFinish = self.onFinish
+        self.onFinish = nil
         stop()
         onFinish?(hotkey)
     }
@@ -109,7 +139,8 @@ struct HotkeyEditor: View {
     let onChange: ([Hotkey]) -> Void
 
     @Environment(DictationController.self) private var controller
-    @State private var capture = HotkeyCapture()
+    @State private var id = UUID()
+    private var capture: HotkeyCapture { .shared }
     @State private var problem: String?
 
     var body: some View {
@@ -128,7 +159,7 @@ struct HotkeyEditor: View {
                         .accessibilityLabel("Remove \(hotkey.title)")
                     }
                 }
-                if capture.isRecording {
+                if capture.isRecording(id) {
                     Text(capture.peak.isEmpty ? "Press keys… (Esc to cancel)" : Hotkey(Array(capture.peak)).title)
                         .font(.callout)
                         .foregroundStyle(Brand.ember)
@@ -141,15 +172,15 @@ struct HotkeyEditor: View {
             }
         }
         .onDisappear {
-            capture.stop()
-            controller.setHotkeysPaused(false)
+            // Leaving the page keeps a combination already pressed.
+            capture.commit(owner: id)
         }
     }
 
     private func record() {
         problem = nil
         controller.setHotkeysPaused(true)
-        capture.start { hotkey in
+        capture.start(owner: id) { hotkey in
             controller.setHotkeysPaused(false)
             guard let hotkey else { return }
             if let issue = hotkey.problem(existing: inUse + current) {
@@ -182,7 +213,7 @@ struct HotkeysPage: View {
                     Text("Good to know").font(.headline)
                     Text("Press Esc at any time to cancel a dictation.")
                     Text("Mouse buttons work too: press Add, then click a side button on your mouse.")
-                    Text("If Fn opens emoji or starts Apple dictation, set “Press 🌐 key to” to “Do Nothing” in System Settings → Keyboard.")
+                    Text("Fn is the 🌐 Globe key. While it is a LahLah hotkey, it no longer opens emoji, so the pill stays. If Apple dictation still starts, set “Press 🌐 key to” to “Do Nothing” in System Settings → Keyboard.")
                 }
                 .font(.callout)
                 .foregroundStyle(Brand.muted)
