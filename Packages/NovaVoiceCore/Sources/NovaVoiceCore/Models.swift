@@ -132,6 +132,8 @@ public struct NovaSettings: Codable, Equatable, Sendable {
     /// Learns a word when you correct how it was heard, so it's written right next time. Reads
     /// the text box again after a paste, on this Mac only, so it's off until turned on.
     public var learnCorrections: Bool
+    /// Spoken edits go to LahLah Video when it is in front, or when you start with "Video,".
+    public var lahlahVideoCommands: Bool
 
     public init(
         localeIdentifier: String = Locale.current.identifier,
@@ -157,7 +159,8 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         useTextBoxContext: Bool = false,
         sendInAgentApps: Bool = true,
         spaceToSend: Bool = true,
-        learnCorrections: Bool = false
+        learnCorrections: Bool = false,
+        lahlahVideoCommands: Bool = true
     ) {
         self.localeIdentifier = localeIdentifier
         self.useAppleIntelligence = useAppleIntelligence
@@ -183,6 +186,7 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         self.sendInAgentApps = sendInAgentApps
         self.spaceToSend = spaceToSend
         self.learnCorrections = learnCorrections
+        self.lahlahVideoCommands = lahlahVideoCommands
     }
 
     /// Reads settings saved by any earlier version. Anything missing takes its default.
@@ -213,6 +217,7 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         sendInAgentApps = try values.decodeIfPresent(Bool.self, forKey: .sendInAgentApps) ?? base.sendInAgentApps
         spaceToSend = try values.decodeIfPresent(Bool.self, forKey: .spaceToSend) ?? base.spaceToSend
         learnCorrections = try values.decodeIfPresent(Bool.self, forKey: .learnCorrections) ?? base.learnCorrections
+        lahlahVideoCommands = try values.decodeIfPresent(Bool.self, forKey: .lahlahVideoCommands) ?? base.lahlahVideoCommands
     }
 
     public func hotkeys(for action: HotkeyAction) -> [Hotkey] {

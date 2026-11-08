@@ -375,6 +375,7 @@ final class DictationController {
         guard !raw.isEmpty else { return showMessage("Didn't catch that") }
 
         let settings = store.settings
+        if settings.lahlahVideoCommands, sendToLahLahVideo(raw) { return }
         let command = settings.pressEnterCommand ? VoiceCommands.splitPressEnter(raw) : (raw, false)
         let bundleID = targetApp?.bundleIdentifier
         let style = AppCatalog.style(forBundleID: bundleID, host: targetHost, settings: settings)
@@ -509,6 +510,22 @@ final class DictationController {
         let usesFn = store.settings.hotkeys(for: .pushToTalk).contains { $0.tokens.contains(.fn) }
             || store.settings.hotkeys(for: .handsFree).contains { $0.tokens.contains(.fn) }
         return usesFn && FnKeySetting.current != .doNothing
+    }
+
+    /// LahLah Video commands: runs the words as an editing command instead of typing them.
+    /// Returns false when the words are not meant for LahLah Video.
+    private func sendToLahLahVideo(_ raw: String) -> Bool {
+        guard
+            let command = LahLahVideoCommands.command(
+                from: raw, frontmostBundleID: targetApp?.bundleIdentifier),
+            let url = LahLahVideoCommands.url(for: command)
+        else { return false }
+        if NSWorkspace.shared.open(url) {
+            showMessage("LahLah Video: \(command)")
+        } else {
+            showMessage("Install LahLah Video to use video commands")
+        }
+        return true
     }
 
     private func showMessage(_ message: String) {

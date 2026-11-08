@@ -599,6 +599,14 @@ struct SettingsView: View {
                             .foregroundStyle(Brand.muted)
                     }
                 }
+                Toggle(isOn: $store.settings.lahlahVideoCommands) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("LahLah Video commands")
+                        Text("In LahLah Video, or when you start with “Video,”, your words run as edits like “split here” instead of being typed.")
+                            .font(.caption)
+                            .foregroundStyle(Brand.muted)
+                    }
+                }
                 Toggle(isOn: $store.settings.spaceToSend) {
                     VStack(alignment: .leading, spacing: 1) {
                         Text("Space finishes and sends while listening hands-free")

@@ -42,6 +42,10 @@ The Android app (voice keyboard, Gemini Nano) lives in its own repo:
 - **Wiki LLM and Planner:** their agent panels have a mic button that starts and stops hands-free
   dictation into the agent's terminal. It works over a local notification (`RemoteControl`) that's
   only accepted while one of those two apps is in front.
+- **LahLah Video commands** (on by default): when [LahLah Video](https://github.com/alfredang/LahLahVideo)
+  is in front, or you start with "Video," or "LahLah Video", your words run as editing commands
+  ("split here", "add crossfade", "export for TikTok") through its `lahlahvideo://command` link
+  instead of being typed. Turn it off in Settings › Sending.
 - **Optional settings:** start and stop sounds, muting speakers while dictating, a "press enter" voice
   command, and spelling names from the text box you're writing in.
 
