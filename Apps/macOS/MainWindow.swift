@@ -590,6 +590,9 @@ struct SettingsView: View {
                     }
                 }
             }
+            Section("API") {
+                APISettings()
+            }
             Section("Sending") {
                 Toggle(isOn: $store.settings.sendInAgentApps) {
                     VStack(alignment: .leading, spacing: 1) {
@@ -671,5 +674,43 @@ struct SettingsView: View {
                 store.settings.localeIdentifier = best.identifier
             }
         }
+    }
+}
+
+/// Settings › API: the local control API for scripts, Claude and LahLah Video.
+struct APISettings: View {
+    @Environment(NovaStore.self) private var store
+    @Environment(DictationController.self) private var controller
+    @State private var showKey = false
+
+    var body: some View {
+        @Bindable var store = store
+        let control = controller.control
+        Toggle(isOn: $store.settings.apiEnabled) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Allow API control")
+                Text("Scripts on this Mac can start and stop dictation and send commands to LahLah Video. Listens on 127.0.0.1 only.")
+                    .font(.caption)
+                    .foregroundStyle(Brand.muted)
+            }
+        }
+        .onChange(of: store.settings.apiEnabled) { control.publish() }
+        LabeledContent("API key") {
+            HStack {
+                Text(showKey ? control.key : String(control.key.prefix(9)) + String(repeating: "•", count: 20))
+                    .font(.system(.caption, design: .monospaced))
+                    .textSelection(.enabled)
+                Button(showKey ? "Hide" : "Show") { showKey.toggle() }
+                Button("Copy") {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(control.key, forType: .string)
+                }
+                Button("Regenerate", role: .destructive) { control.regenerateKey() }
+            }
+        }
+        LabeledContent("Base URL") {
+            Text(control.baseURL).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+        }
+        Link("API reference", destination: URL(string: "https://github.com/alfredang/lahlahvoiceapp/blob/main/docs/API.md")!)
     }
 }

@@ -134,6 +134,8 @@ public struct NovaSettings: Codable, Equatable, Sendable {
     public var learnCorrections: Bool
     /// Spoken edits go to LahLah Video when it is in front, or when you start with "Video,".
     public var lahlahVideoCommands: Bool
+    /// macOS: the local control API on 127.0.0.1 (key in the Keychain).
+    public var apiEnabled: Bool
 
     public init(
         localeIdentifier: String = Locale.current.identifier,
@@ -160,7 +162,8 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         sendInAgentApps: Bool = true,
         spaceToSend: Bool = true,
         learnCorrections: Bool = false,
-        lahlahVideoCommands: Bool = true
+        lahlahVideoCommands: Bool = true,
+        apiEnabled: Bool = true
     ) {
         self.localeIdentifier = localeIdentifier
         self.useAppleIntelligence = useAppleIntelligence
@@ -187,6 +190,7 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         self.spaceToSend = spaceToSend
         self.learnCorrections = learnCorrections
         self.lahlahVideoCommands = lahlahVideoCommands
+        self.apiEnabled = apiEnabled
     }
 
     /// Reads settings saved by any earlier version. Anything missing takes its default.
@@ -218,6 +222,7 @@ public struct NovaSettings: Codable, Equatable, Sendable {
         spaceToSend = try values.decodeIfPresent(Bool.self, forKey: .spaceToSend) ?? base.spaceToSend
         learnCorrections = try values.decodeIfPresent(Bool.self, forKey: .learnCorrections) ?? base.learnCorrections
         lahlahVideoCommands = try values.decodeIfPresent(Bool.self, forKey: .lahlahVideoCommands) ?? base.lahlahVideoCommands
+        apiEnabled = try values.decodeIfPresent(Bool.self, forKey: .apiEnabled) ?? base.apiEnabled
     }
 
     public func hotkeys(for action: HotkeyAction) -> [Hotkey] {
