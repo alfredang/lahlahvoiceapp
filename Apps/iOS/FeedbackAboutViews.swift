@@ -122,6 +122,6 @@ struct AboutView: View {
 enum AppLinks {
     static let privacy = URL(string: "https://www.tertiaryinfotech.com/privacy")!
     static let terms = URL(string: "https://www.tertiaryinfotech.com/terms")!
-    static let support = URL(string: "https://alfredang.github.io/lahlahvoice/support.html")!
+    static let support = URL(string: "https://alfredang.github.io/lahlahvoiceapp/support.html")!
     static let developer = URL(string: "https://www.tertiaryinfotech.com")!
 }

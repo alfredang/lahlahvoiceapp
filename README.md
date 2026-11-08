@@ -16,7 +16,7 @@ with an optional open model (Qwen3.5 through MLX) as the primary model or the fa
 | Style | Automatic per app category | Chosen on the keyboard |
 | Distribution | Notarized DMG (Developer ID) | App Store |
 
-Website: <https://alfredang.github.io/lahlahvoice/>
+Website: <https://alfredang.github.io/lahlahvoiceapp/>
 
 ## Mac features
 
